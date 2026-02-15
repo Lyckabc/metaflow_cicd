@@ -26,7 +26,11 @@ func DockerBuildPushActivity(ctx context.Context, config *workflow.PipelineConfi
 	if branch == "" {
 		branch = "main"
 	}
-	cloneCmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "-b", branch, config.RepoURL, tmpDir)
+	cloneURL := config.RepoURL
+	if config.AccessToken != "" {
+		cloneURL = injectTokenIntoURL(config.RepoURL, config.AccessToken)
+	}
+	cloneCmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "-b", branch, cloneURL, tmpDir)
 	var cloneOut, cloneErr bytes.Buffer
 	cloneCmd.Stdout = &cloneOut
 	cloneCmd.Stderr = &cloneErr

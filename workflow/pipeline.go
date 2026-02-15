@@ -18,6 +18,7 @@ type PipelineConfig struct {
 	RegistryID       string
 	RegistryPassword string
 	BuildMode        string // "ci" or "cd"
+	AccessToken      string // Git PAT for private repo clone (optional)
 }
 
 // RunnerInput is the output of Manager (Pre-flight) and input for Runner Workflow.
