@@ -44,15 +44,15 @@ func main() {
 
 	mainRepoURL := os.Getenv("METAFLOW_CICD_MAIN_REPO_URL")
 	if mainRepoURL == "" {
-		mainRepoURL = "https://github.com/neunexus/metaflow_cicd"
+		mainRepoURL = "https://github.com/Lyckabc/metaflow_cicd"
 	}
 
 	p := &repository.Project{
 		ProjectName:    "metaflow_cicd",
 		MainRepoURL:    mainRepoURL,
 		TargetBranches: pq.StringArray{"main", "dev", "^feature/.*", "^release-.*"},
-		CIConfigPath:   "metaflow_ci.py",
-		CDConfigPath:   "metaflow_ci.py",
+		CIConfigPath:   "flows/metaflow-ci.toml",
+		CDConfigPath:   "flows/metaflow-ci.toml",
 		IsActive:       true,
 	}
 	if err := repo.CreateProject(ctx, p); err != nil {

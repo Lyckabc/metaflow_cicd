@@ -7,16 +7,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/neunexus/metaflow_cicd/workflow"
 )
 
-// RunMetaflowActivity clones repo, verifies config, injects secrets, runs Metaflow, and cleans up.
-// Git Clone: Manager에서 받은 Git URL과 Token으로 임시 디렉토리에 클론
-// Config Load: config_path 파일이 존재하는지 확인
-// Secret Injection: secrets를 환경 변수로 주입
-// Execution: python <config_path> run 실행, 로그를 실시간 캡처
-// Clean-up: 성공/실패 여부와 관계없이 임시 디렉토리 삭제
+// RunMetaflowActivity clones repo, parses metaflow-ci.toml (or legacy .py), injects secrets, runs pre_build+command.
+//
+// Flow (per guide):
+// 1. Git Clone: clone from Git URL (with token if provided)
+// 2. Config Load: if ci_config_path is .toml → parse [build], [secrets_mapping], [config]
+// 3. Secret Injection: apply secrets_mapping (env_var = DB secret_key) → set env from input.Secrets
+// 4. Execution: pre_build → command (from TOML) or legacy "python <path> run"
+// 5. Clean-up: remove temp dir
 func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*workflow.RunResult, error) {
 	tmpDir, err := os.MkdirTemp("", "metaflow-cicd-"+input.ProjectName+"-*")
 	if err != nil {
@@ -26,10 +29,9 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 		os.RemoveAll(tmpDir)
 	}()
 
-	// 1. Git Clone (Token 사용 시 URL에 포함)
+	// 1. Git Clone
 	cloneURL := input.GitURL
 	if input.AccessToken != "" {
-		// https://token@github.com/org/repo 형식
 		cloneURL = injectTokenIntoURL(input.GitURL, input.AccessToken)
 	}
 	branch := input.Branch
@@ -49,7 +51,7 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 		}, nil
 	}
 
-	// 2. Config Load: config_path 파일 존재 확인
+	// 2. Config Load
 	configFullPath := filepath.Join(tmpDir, input.ConfigPath)
 	if _, err := os.Stat(configFullPath); os.IsNotExist(err) {
 		return &workflow.RunResult{
@@ -59,27 +61,80 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 		}, nil
 	}
 
-	// 3. Secret Injection: 환경 변수로 주입
-	cmd := exec.CommandContext(ctx, "python", input.ConfigPath, "run")
-	cmd.Dir = tmpDir
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		for i := 0; i < len(e); i++ {
-			if e[i] == '=' {
-				envMap[e[:i]] = e[i+1:]
-				break
-			}
-		}
-	}
+	// Build env from current process + secrets
+	envMap := envFromOS()
 	for k, v := range input.Secrets {
 		envMap[k] = v
 	}
-	cmd.Env = make([]string, 0, len(envMap))
-	for k, v := range envMap {
-		cmd.Env = append(cmd.Env, k+"="+v)
+
+	var preBuild, command string
+	if IsTOMLConfig(input.ConfigPath) {
+		tomlCfg, err := ParseMetaflowCITOML(configFullPath)
+		if err != nil {
+			return &workflow.RunResult{
+				Stderr:   fmt.Sprintf("parse metaflow-ci.toml: %v", err),
+				ExitCode: 1,
+				Success:  false,
+			}, nil
+		}
+		preBuild = strings.TrimSpace(tomlCfg.Build.PreBuild)
+		command = strings.TrimSpace(tomlCfg.Build.Command)
+		if command == "" {
+			command = "python " + tomlCfg.Build.Entrypoint + " run"
+		}
+		// Apply secrets_mapping: [env_var] = [DB secret_key] → env[env_var] = secrets[secret_key]
+		for envVar, secretKey := range tomlCfg.SecretsMapping {
+			if v, ok := input.Secrets[secretKey]; ok {
+				envMap[envVar] = v
+			}
+		}
+		// Apply [config] section as env (non-sensitive)
+		for k, v := range tomlCfg.Config {
+			envMap[k] = v
+		}
+	} else {
+		// Legacy: config_path is Python file
+		command = "python " + input.ConfigPath + " run"
 	}
 
-	// 4. Execution: python <config_path> run
+	envSlice := envMapToSlice(envMap)
+
+	// 3. Run pre_build (if set)
+	if preBuild != "" {
+		preResult := runShell(ctx, tmpDir, envSlice, preBuild)
+		if !preResult.Success {
+			return preResult, nil
+		}
+	}
+
+	// 4. Run command
+	result := runShell(ctx, tmpDir, envSlice, command)
+	return result, nil
+}
+
+func envFromOS() map[string]string {
+	m := make(map[string]string)
+	for _, e := range os.Environ() {
+		idx := strings.Index(e, "=")
+		if idx > 0 {
+			m[e[:idx]] = e[idx+1:]
+		}
+	}
+	return m
+}
+
+func envMapToSlice(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+func runShell(ctx context.Context, dir string, env []string, cmdStr string) *workflow.RunResult {
+	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	cmd.Dir = dir
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -92,21 +147,18 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 			exitCode = 1
 		}
 	}
-
 	return &workflow.RunResult{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 		Success:  exitCode == 0,
-	}, nil
+	}
 }
 
 func injectTokenIntoURL(rawURL, token string) string {
-	// https://github.com/org/repo -> https://token@github.com/org/repo
 	if token == "" {
 		return rawURL
 	}
-	// Simple: insert token after scheme
 	if len(rawURL) > 8 && rawURL[:8] == "https://" {
 		return "https://" + token + "@" + rawURL[8:]
 	}

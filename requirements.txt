@@ -1,0 +1,2 @@
+# Minimal deps for metaflow_ci.py (Temporal CI test)
+# Add metaflow, etc. when using full Metaflow flows

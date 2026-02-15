@@ -13,12 +13,12 @@ INSERT INTO projects (
     description
 ) VALUES (
     'metaflow_cicd',
-    'https://github.com/neunexus/metaflow_cicd',
+    'https://github.com/Lyckabc/metaflow_cicd',
     ARRAY['main', 'dev', '^feature/.*', '^release-.*'],
     NULL,
-    'metaflow_ci.py',
+    'flows/metaflow-ci.toml',
     NULL,
-    'metaflow_ci.py',
+    'flows/metaflow-ci.toml',
     TRUE,
     'Temporal-based CI/CD pipeline for Metaflow'
 ) ON CONFLICT (project_name) DO UPDATE SET
