@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/neunexus/metaflow_cicd/internal/repository"
 	"github.com/neunexus/metaflow_cicd/workflow"
@@ -12,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetConfigActivity queries DB by service_name. If not found, uses fallback from request (webhook).
+// GetConfigActivity queries DB by main_repo_url or project_name. Used by DynamicRunnerWorkflow (legacy).
 func GetConfigActivity(ctx context.Context, req workflow.PipelineRequest) (*workflow.PipelineConfig, error) {
 	db := connectMetaflowDB()
 	repo, err := repository.New(db)
@@ -20,58 +19,52 @@ func GetConfigActivity(ctx context.Context, req workflow.PipelineRequest) (*work
 		return nil, fmt.Errorf("repository init: %w", err)
 	}
 
-	project, err := repo.GetProjectByServiceName(ctx, req.ServiceName)
-	if err == repository.ErrNotFound && strings.Contains(req.ServiceName, "/") {
-		// Try repo name only (e.g. Nucleus from Lyckabc/Nucleus)
-		parts := strings.Split(req.ServiceName, "/")
-		project, err = repo.GetProjectByServiceName(ctx, parts[len(parts)-1])
+	var project *repository.Project
+	project, err = repo.GetProjectByMainRepoURL(ctx, req.RepoURL)
+	if err == repository.ErrNotFound {
+		project, err = repo.GetProjectByProjectName(ctx, req.ServiceName)
 	}
 	if err != nil && err != repository.ErrNotFound {
 		return nil, err
 	}
 
-	var svcName, repoURL, branch, registryURL, runCmd string
-	if project != nil {
-		svcName = project.ServiceName
-		repoURL = project.RepoURL
-		branch = project.Branch
-		registryURL = project.RegistryURL
-		runCmd = project.RunCommand
-	} else {
-		svcName = req.ServiceName
-		repoURL = req.RepoURL
-		branch = req.Branch
-		if branch == "" {
-			branch = "main"
-		}
-	}
-	if repoURL == "" {
-		return nil, fmt.Errorf("service_name %q not in ci_projects and no repo_url fallback", req.ServiceName)
-	}
-	if svcName == "" {
-		svcName = req.ServiceName
-	}
+	svcName := req.ServiceName
+	repoURL := req.RepoURL
+	branch := req.Branch
 	if branch == "" {
-		branch = req.Branch
-		if branch == "" {
-			branch = "main"
-		}
+		branch = "main"
 	}
-	if runCmd == "" {
-		runCmd = "pip install -r requirements.txt"
-	}
+	registryURL := ""
+	runCmd := "pip install -r requirements.txt"
+	registryID := ""
+	registryPassword := ""
 
-	// Override branch from request (webhook provides head/base ref)
+	if project != nil {
+		svcName = project.ProjectName
+		repoURL = project.MainRepoURL
+		if len(project.TargetBranches) > 0 {
+			branch = project.TargetBranches[0]
+		}
+		runCmd = "python " + project.CIConfigPath + " run"
+		if req.BuildMode == "cd" {
+			runCmd = "python " + project.CDConfigPath + " run"
+		}
+		registryID, _ = repo.GetSecretValue(ctx, int(project.ID), "REGISTRY_ID", "prod")
+		registryPassword, _ = repo.GetSecretValue(ctx, int(project.ID), "REGISTRY_PASSWORD", "prod")
+		registryURL, _ = repo.GetSecretValue(ctx, int(project.ID), "REGISTRY_URL", "prod")
+	}
 	if req.Branch != "" {
 		branch = req.Branch
 	}
 	if req.RepoURL != "" {
 		repoURL = req.RepoURL
 	}
-
-	// Registry credentials from ci_secrets
-	registryID, _ := repo.GetSecretValue(ctx, "REGISTRY_ID")
-	registryPassword, _ := repo.GetSecretValue(ctx, "REGISTRY_PASSWORD")
+	if repoURL == "" {
+		return nil, fmt.Errorf("repo_url not found (add project to DB or provide in request)")
+	}
+	if svcName == "" {
+		svcName = req.ServiceName
+	}
 
 	buildMode := req.BuildMode
 	if buildMode == "" {

@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	"github.com/lib/pq"
 	"github.com/neunexus/metaflow_cicd/internal/repository"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -18,63 +19,86 @@ import (
 // openAPISpec is OpenAPI 3.0 spec for interactive docs (Swagger UI).
 const openAPISpec = `{
   "openapi": "3.0.3",
-  "info": { "title": "Metaflow CICD API", "version": "1.0.0" },
+  "info": { "title": "Metaflow CICD API", "version": "2.0.0" },
   "paths": {
-    "/ci_projects": {
+    "/sources": {
       "post": {
-        "summary": "Create CI project",
+        "summary": "Create source",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["repo_url"],
+                "required": ["name", "type"],
                 "properties": {
-                  "service_name": { "type": "weknora" },
-                  "repo_url": { "type": "https://github.com/Lyckabc/WeKnora" },
-                  "branch": { "type": "dev", "default": "main" },
-                  "registry_url": { "type": "https://registry.toji.homes/" }
+                  "name": { "type": "string" },
+                  "type": { "type": "string", "enum": ["git", "db", "api"] },
+                  "host": { "type": "string" },
+                  "access_token": { "type": "string" },
+                  "description": { "type": "string" }
                 }
               }
             }
           }
         },
-        "responses": {
-          "201": { "description": "Created" },
-          "400": { "description": "Bad request" }
-        }
+        "responses": { "201": { "description": "Created" }, "400": { "description": "Bad request" } }
       }
     },
-    "/ci_secrets": {
+    "/projects": {
       "post": {
-        "summary": "Create CI secret",
+        "summary": "Create project",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["key", "value", "description"],
+                "required": ["project_name", "main_repo_url", "target_branches", "ci_config_path", "cd_config_path"],
                 "properties": {
-                  "key": { "type": "registry_password" },
-                  "value": { "type": "secret123" },
-                  "description": { "type": "Registry login password" }
+                  "project_name": { "type": "string" },
+                  "main_repo_url": { "type": "string" },
+                  "target_branches": { "type": "array", "items": { "type": "string" } },
+                  "ci_source_name": { "type": "string" },
+                  "ci_config_path": { "type": "string" },
+                  "cd_source_name": { "type": "string" },
+                  "cd_config_path": { "type": "string" },
+                  "description": { "type": "string" }
                 }
               }
             }
           }
         },
-        "responses": {
-          "201": { "description": "Created" },
-          "400": { "description": "Bad request" }
-        }
+        "responses": { "201": { "description": "Created" }, "400": { "description": "Bad request" } }
+      }
+    },
+    "/secrets": {
+      "post": {
+        "summary": "Create secret",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project_id", "secret_key", "secret_value"],
+                "properties": {
+                  "project_id": { "type": "integer" },
+                  "secret_key": { "type": "string" },
+                  "secret_value": { "type": "string" },
+                  "scope": { "type": "string", "default": "prod" },
+                  "description": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" }, "400": { "description": "Bad request" } }
       }
     }
   }
 }`
 
-// swaggerUIHTML serves Swagger UI (like FastAPI /docs).
 const swaggerUIHTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -88,10 +112,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
       window.ui = SwaggerUIBundle({
         url: "/openapi.json",
         dom_id: "#swagger-ui",
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIBundle.presets.standalone
-        ]
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.presets.standalone]
       });
     };
   </script>
@@ -128,39 +149,85 @@ func main() {
 	db := connectDB()
 	repo, err := repository.New(db)
 	if err != nil {
-		log.Fatalln("Repository init (AutoMigrate):", err)
+		log.Fatalln("Repository init:", err)
 	}
 	ctx := context.Background()
 
-	http.HandleFunc("POST /ci_projects", func(w http.ResponseWriter, r *http.Request) {
+	// POST /sources
+	http.HandleFunc("POST /sources", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var body struct {
-			ServiceName string `json:"service_name"`
-			RepoURL     string `json:"repo_url"`
-			Branch      string `json:"branch"`
-			RegistryURL string `json:"registry_url"`
-			RunCommand  string `json:"run_command"`
+			Name         string  `json:"name"`
+			Type         string  `json:"type"`
+			Host         *string `json:"host"`
+			AccessToken  *string `json:"access_token"`
+			WebhookSecret *string `json:"webhook_secret"`
+			Description  *string `json:"description"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if body.RepoURL == "" {
-			http.Error(w, "repo_url is required", http.StatusBadRequest)
+		if body.Name == "" || body.Type == "" {
+			http.Error(w, "name and type are required", http.StatusBadRequest)
 			return
 		}
-		if body.Branch == "" {
-			body.Branch = "main"
+		s := &repository.Source{
+			Name:          body.Name,
+			Type:          body.Type,
+			Host:          body.Host,
+			AccessToken:   body.AccessToken,
+			WebhookSecret: body.WebhookSecret,
+			Description:   body.Description,
 		}
-		p := &repository.CIProject{
-			ServiceName: body.ServiceName,
-			RepoURL:     body.RepoURL,
-			Branch:      body.Branch,
-			RegistryURL: body.RegistryURL,
-			RunCommand:  body.RunCommand,
+		if err := repo.CreateSource(ctx, s); err != nil {
+			http.Error(w, "create failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": s.ID, "name": s.Name})
+	})
+
+	// POST /projects
+	http.HandleFunc("POST /projects", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			ProjectName    string   `json:"project_name"`
+			MainRepoURL    string   `json:"main_repo_url"`
+			TargetBranches []string `json:"target_branches"`
+			CISourceName   *string  `json:"ci_source_name"`
+			CIConfigPath   string   `json:"ci_config_path"`
+			CDSourceName   *string  `json:"cd_source_name"`
+			CDConfigPath   string   `json:"cd_config_path"`
+			Description    *string  `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if body.ProjectName == "" || body.MainRepoURL == "" || body.CIConfigPath == "" || body.CDConfigPath == "" {
+			http.Error(w, "project_name, main_repo_url, ci_config_path, cd_config_path are required", http.StatusBadRequest)
+			return
+		}
+		if len(body.TargetBranches) == 0 {
+			body.TargetBranches = []string{"main"}
+		}
+		p := &repository.Project{
+			ProjectName:    body.ProjectName,
+			MainRepoURL:    body.MainRepoURL,
+			TargetBranches: pq.StringArray(body.TargetBranches),
+			CISourceName:   body.CISourceName,
+			CIConfigPath:   body.CIConfigPath,
+			CDSourceName:   body.CDSourceName,
+			CDConfigPath:   body.CDConfigPath,
+			Description:   body.Description,
 		}
 		if err := repo.CreateProject(ctx, p); err != nil {
 			http.Error(w, "create failed: "+err.Error(), http.StatusInternalServerError)
@@ -168,30 +235,38 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": p.ID, "service_name": p.ServiceName})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": p.ID, "project_name": p.ProjectName})
 	})
 
-	http.HandleFunc("POST /ci_secrets", func(w http.ResponseWriter, r *http.Request) {
+	// POST /secrets
+	http.HandleFunc("POST /secrets", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var body struct {
-			Key         string `json:"key"`
-			Value       string `json:"value"`
-			Description string `json:"description"`
+			ProjectID   int     `json:"project_id"`
+			SecretKey   string  `json:"secret_key"`
+			SecretValue string  `json:"secret_value"`
+			Scope       string  `json:"scope"`
+			Description *string `json:"description"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if body.Key == "" || body.Value == "" || body.Description == "" {
-			http.Error(w, "key, value, description are required", http.StatusBadRequest)
+		if body.ProjectID == 0 || body.SecretKey == "" || body.SecretValue == "" {
+			http.Error(w, "project_id, secret_key, secret_value are required", http.StatusBadRequest)
 			return
 		}
-		s := &repository.CISecret{
-			Key:         body.Key,
-			Value:       body.Value,
+		if body.Scope == "" {
+			body.Scope = "prod"
+		}
+		s := &repository.Secret{
+			ProjectID:   body.ProjectID,
+			SecretKey:   body.SecretKey,
+			SecretValue: body.SecretValue,
+			Scope:       body.Scope,
 			Description: body.Description,
 		}
 		if err := repo.CreateSecret(ctx, s); err != nil {
@@ -200,16 +275,13 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": s.ID, "key": s.Key})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": s.ID, "secret_key": s.SecretKey})
 	})
 
-	// OpenAPI spec (for Swagger UI)
 	http.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(openAPISpec))
 	})
-
-	// Swagger UI (FastAPI /docs style)
 	http.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(swaggerUIHTML))
@@ -220,12 +292,12 @@ func main() {
 	if port == "" {
 		port = "8059"
 	}
-	flag.StringVar(&host, "host", host, "listen host (e.g. 0.0.0.0 for LAN access)")
+	flag.StringVar(&host, "host", host, "listen host")
 	flag.Parse()
 	if host == "" {
 		host = "0.0.0.0"
 	}
 	addr := host + ":" + port
-	log.Printf("API server listening on %s (POST /ci_projects, POST /ci_secrets, GET /docs)", addr)
+	log.Printf("API server listening on %s (POST /sources, POST /projects, POST /secrets, GET /docs)", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
