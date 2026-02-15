@@ -142,6 +142,7 @@ func main() {
 			RepoURL     string `json:"repo_url"`
 			Branch      string `json:"branch"`
 			RegistryURL string `json:"registry_url"`
+			RunCommand  string `json:"run_command"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
@@ -159,6 +160,7 @@ func main() {
 			RepoURL:     body.RepoURL,
 			Branch:      body.Branch,
 			RegistryURL: body.RegistryURL,
+			RunCommand:  body.RunCommand,
 		}
 		if err := repo.CreateProject(ctx, p); err != nil {
 			http.Error(w, "create failed: "+err.Error(), http.StatusInternalServerError)

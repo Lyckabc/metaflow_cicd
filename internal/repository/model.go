@@ -1,13 +1,14 @@
 package repository
 
 // CIProject is the DB model for ci_projects table.
-// DDL: id serial4, service_name varchar(50) UNIQUE, repo_url text NOT NULL, branch varchar(50) DEFAULT 'main', registry_url text.
+// DDL: id serial4, service_name varchar(50) UNIQUE, repo_url text NOT NULL, branch varchar(50) DEFAULT 'main', registry_url text, run_command text.
 type CIProject struct {
 	ID          uint   `gorm:"primaryKey"`
 	ServiceName string `gorm:"column:service_name;size:50;uniqueIndex:ci_projects_service_name_key"`
 	RepoURL     string `gorm:"column:repo_url;not null"`
 	Branch      string `gorm:"column:branch;size:50;default:main"`
 	RegistryURL string `gorm:"column:registry_url"`
+	RunCommand  string `gorm:"column:run_command"` // e.g. "pip install -r requirements.txt && python -m pytest" or "./ci.sh"
 }
 
 // TableName overrides the table name for GORM.

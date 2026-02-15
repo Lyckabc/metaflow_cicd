@@ -2,14 +2,23 @@ package main
 
 import (
 	"log"
+	"os"
+	"strings"
 
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
 
 func main() {
-	// 1. Temporal 서버 연결 (기본 localhost:7233)
-	c, err := client.Dial(client.Options{})
+	hostPort := os.Getenv("TEMPORAL_ADDRESS")
+	if hostPort == "" {
+		hostPort = "localhost:7233"
+	}
+	if strings.HasPrefix(hostPort, "localhost:") {
+		hostPort = "127.0.0.1" + hostPort[len("localhost"):]
+	}
+	// 1. Temporal 서버 연결
+	c, err := client.Dial(client.Options{HostPort: hostPort})
 	if err != nil {
 		log.Fatalln("Unable to create client", err)
 	}

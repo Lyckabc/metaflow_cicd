@@ -25,7 +25,15 @@ func main() {
 	defer c.Close()
 
 	tr := handler.NewTrigger(c)
-	webhook := handler.NewWebhookAdapter(tr)
+	// Convoy endpoint secret (same as setup_convoy_github.py --github-secret) for X-Convoy-Signature verification
+	secret := os.Getenv("CONVOY_ENDPOINT_SECRET")
+	if secret == "" {
+		secret = os.Getenv("GITHUB_WEBHOOK_SECRET")
+	}
+	if secret == "" {
+		log.Print("Warning: CONVOY_ENDPOINT_SECRET not set; webhook signature verification disabled")
+	}
+	webhook := handler.NewWebhookAdapter(tr, secret)
 
 	http.Handle("POST /trigger", tr)
 	http.Handle("POST /webhooks/github", webhook)
