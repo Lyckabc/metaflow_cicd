@@ -20,6 +20,24 @@ type PipelineConfig struct {
 	BuildMode        string // "ci" or "cd"
 }
 
+// RunnerInput is the output of Manager (Pre-flight) and input for Runner Workflow.
+// Contains Git URL, token, config path, and secrets for Metaflow execution.
+type RunnerInput struct {
+	ProjectName string
+	GitURL      string
+	AccessToken string // Git PAT for clone
+	Branch      string
+	ConfigPath  string // e.g. "metaflow_ci.py" or "flow.py"
+	Secrets     map[string]string
+	BuildMode   string // "ci" or "cd"
+
+	// GitHub metadata for commit status updates
+	GitHubOwner       string
+	GitHubRepo        string
+	GitHubSHA         string
+	TemporalUIBaseURL string
+}
+
 // RunResult is the output of RunWork stage.
 type RunResult struct {
 	Stdout   string
