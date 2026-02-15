@@ -46,154 +46,96 @@ docker compose up -d
 |--------|------|------|
 | temporal | Temporal 서버 (gRPC) | 네트워크 내 `temporal:7233`, 호스트 `localhost:7233` |
 | temporal-ui | 웹 UI | 설정에 따라 `PORT`/프록시 등 |
-| cicd-worker | CI 워크플로우 Worker (ci-task-queue) | - |
+| metaflow_cicd | CI 워크플로우 Worker (ci-task-queue) | - |
+| metaflow_manager | Trigger + WebhookAdapter (POST /trigger, /webhooks/github) | - |
 | temporal-admin-tools | CLI 도구 | `docker exec -it temporal-admin-tools tctl ...` |
-| starter | 워크플로우 트리거 (profile: tools) | `docker compose --profile tools run --rm starter` |
 
-## 3. DB 테이블(DDL) 및 POST API (ci_projects / ci_secrets)
+## 3. DB 테이블(DDL) 및 POST API (sources, projects, secrets)
 
-테이블은 GORM `AutoMigrate`로 생성되거나, 아래 DDL로 직접 생성할 수 있습니다.
+테이블은 GORM `AutoMigrate`로 생성됩니다. DDL은 `migrations/001_schema.sql` 참조.
 
-```sql
-CREATE TABLE public.ci_projects (
-	id serial4 NOT NULL,
-	service_name varchar(50) NULL,
-	repo_url text NOT NULL,
-	branch varchar(50) DEFAULT 'main'::character varying NULL,
-	registry_url text NULL,
-	CONSTRAINT ci_projects_pkey PRIMARY KEY (id),
-	CONSTRAINT ci_projects_service_name_key UNIQUE (service_name)
-);
+### 워크플로우 구조 (Manager → Runner)
 
-CREATE TABLE public.ci_secrets (
-	id serial4 NOT NULL,
-	"key" varchar(50) NULL,
-	value text NOT NULL,
-	description text NOT NULL,
-	CONSTRAINT ci_secrets_key_key UNIQUE (key),
-	CONSTRAINT ci_secrets_pkey PRIMARY KEY (id)
-);
-```
+- **ManagerWorkflow**: Pre-flight 검사 (main_repo_url 존재, branch 패턴 매칭), Source 참조, Runner 트리거
+- **RunnerWorkflow**: Git clone, config 검증, secret 주입, `python <config_path> run` 실행
 
 ### POST로 DB에 데이터 넣기 (API 서버)
 
-`cmd/server`는 POST로 `ci_projects`, `ci_secrets`를 DB에 넣는 HTTP API를 제공합니다.
+`cmd/server`는 POST로 `sources`, `projects`, `secrets`를 DB에 넣는 HTTP API를 제공합니다.
 
-**서버 실행 (GORM 사용):**
+**서버 실행:**
 
 ```bash
 cd /morphogen/neunexus/cicd/temporal/metaflow_cicd
-
-# 환경 변수 설정 (temporal/.env 기준으로 아래처럼 export 하거나 .env 로드)
-export METAFLOW_CICD_DB_HOST=toji.homes
-export METAFLOW_CICD_DB_PORT=5432
-export METAFLOW_CICD_DB_NAME=metaflow_cicd
-export METAFLOW_CICD_DB_USER=admin_metaflow
-export METAFLOW_CICD_DB_PASSWORD='metaflow_Foundation$3'
-export METAFLOW_CICD_DB_SSLMODE=disable
-
-# API 서버 기동 (기본 포트 8080, METAFLOW_CICD_API_PORT 로 변경 가능)
-go run ./cmd/server
-go run ./cmd/server --host 0.0.0.0
+go run ./cmd/server   # 기본 포트 8059
 ```
 
 **POST 요청 예시:**
 
 ```bash
-# ci_projects 등록 (repo_url 필수, branch 생략 시 main)
-curl -X POST http://localhost:8080/ci_projects \
+# projects 등록
+curl -X POST http://localhost:8059/projects \
   -H "Content-Type: application/json" \
-  -d '{"service_name":"my-service","repo_url":"https://github.com/org/repo","branch":"main","registry_url":"https://registry.example.com"}'
+  -d '{"project_name":"metaflow_cicd","main_repo_url":"https://github.com/neunexus/metaflow_cicd","target_branches":["main","dev","^feature/.*"],"ci_config_path":"metaflow_ci.py","cd_config_path":"metaflow_ci.py"}'
 
-# ci_secrets 등록 (key, value, description 모두 필수)
-curl -X POST http://localhost:8080/ci_secrets \
+# secrets 등록 (project_id 필요)
+curl -X POST http://localhost:8059/secrets \
   -H "Content-Type: application/json" \
-  -d '{"key":"registry_password","value":"secret123","description":"Registry login password"}'
+  -d '{"project_id":1,"secret_key":"REGISTRY_ID","secret_value":"user","scope":"prod"}'
 ```
 
-### GORM 실행 방법 요약
+### metaflow_cicd 프로젝트 시드
 
-| 목적 | 명령 | 비고 |
-|------|------|------|
-| API 서버 (POST로 DB 입력) | `go run ./cmd/server` | 위 환경 변수 설정 후 실행 |
-| Starter (워크플로우 트리거) | `go run ./cmd/starter` | `CI_SERVICE_NAME` 등 env 또는 DB에서 프로젝트 조회 |
+```bash
+go run ./cmd/seed   # metaflow_cicd 프로젝트 생성
+```
 
-- **DB 연결**: `METAFLOW_CICD_DSN` 한 번에 지정하거나, `METAFLOW_CICD_DB_HOST`, `METAFLOW_CICD_DB_PORT`, `METAFLOW_CICD_DB_USER`, `METAFLOW_CICD_DB_PASSWORD`, `METAFLOW_CICD_DB_NAME`, `METAFLOW_CICD_DB_SSLMODE` 로 분리 지정.
-- **AutoMigrate**: `repository.New(db)` 호출 시 `ci_projects`, `ci_secrets` 테이블이 없으면 생성됩니다.
+### 파이프라인 테스트
+
+```bash
+# 1. API 서버, metaflow_manager, metaflow_cicd Worker 실행 후
+./scripts/test_pipeline.sh
+```
 
 ## 4. 워크플로우 실행 방법
 
-### 방법 1) Starter (Docker, 권장)
-
-같은 네트워크에서 **서비스 이름** `temporal:7233`으로 접속해 워크플로우를 한 번 시작합니다.
-
-**DB에 프로젝트가 있을 때** (테이블 `ci_projects`, 컬럼 `service_name`, `repo_url`, `branch`):
+### 방법 1) POST /trigger (Webhook 또는 수동)
 
 ```bash
-cd /morphogen/neunexus/cicd/temporal
-docker compose --profile tools run --rm starter
+curl -X POST http://localhost:8080/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"service_name":"metaflow_cicd","repo_url":"https://github.com/neunexus/metaflow_cicd","branch":"main","build_mode":"ci"}'
 ```
-
-**DB 없이 / 특정 프로젝트만 실행** — 환경 변수로 지정:
-
-```bash
-# 예: my-api 서비스, 브랜치 main
-CI_SERVICE_NAME=my-api CI_REPO_URL=https://github.com/org/my-api CI_BRANCH=main \
-  docker compose --profile tools run --rm starter
-
-# .env 에 넣거나 export 해도 됨
-export CI_SERVICE_NAME=my-api
-export CI_REPO_URL=https://github.com/org/my-api
-export CI_BRANCH=main
-docker compose --profile tools run --rm starter
-```
-
-- `CI_SERVICE_NAME`: 프로젝트 식별자 (기본 `my-service`). DB에 있으면 DB 값 사용, 없으면 env 사용.
-- `CI_REPO_URL`, `CI_BRANCH`: DB에 행이 없을 때만 사용 (기본 브랜치 `main`).
 
 ### 방법 2) Temporal CLI (tctl)
-
-Worker가 떠 있는 상태에서 수동으로 한 번 시작:
 
 ```bash
 docker exec -it temporal-admin-tools tctl workflow start \
   --taskqueue ci-task-queue \
-  --workflow_type CIWorkflow \
-  --input '{"ServiceName":"my-service","RepoURL":"https://github.com/org/repo","Branch":"main"}'
+  --workflow_type ManagerWorkflow \
+  --input '{"ServiceName":"metaflow_cicd","RepoURL":"https://github.com/neunexus/metaflow_cicd","Branch":"main","BuildMode":"ci"}'
 ```
 
-### 방법 3) Starter (호스트에서 go run)
-
-- `TEMPORAL_ADDRESS=127.0.0.1:7233 go run ./cmd/starter`
-- 또는 `/etc/hosts`에 `127.0.0.1 temporal` 추가 후 `go run ./cmd/starter`
-
-Starter는 DB(`ci_projects`)에서 `CI_SERVICE_NAME`(기본 `my-service`)으로 프로젝트를 조회하고, 없으면 env `CI_REPO_URL`, `CI_BRANCH`를 씁니다.
-
-### 방법 4) 코드에서 클라이언트로 실행
-
-다른 서비스에서 Temporal 클라이언트로 워크플로우를 시작할 수 있습니다. 같은 네트워크면 서비스 이름 사용.
+### 방법 3) 코드에서 클라이언트로 실행
 
 ```go
 c, _ := client.Dial(client.Options{HostPort: "temporal:7233"})
 defer c.Close()
-
-options := client.StartWorkflowOptions{
-    ID:        "CI-my-service-1",
-    TaskQueue: "ci-task-queue",
-}
+options := client.StartWorkflowOptions{ID: "ci-metaflow_cicd-1", TaskQueue: "ci-task-queue"}
 args := workflow.PipelineRequest{
-    ServiceName: "my-service",
-    RepoURL:     "https://github.com/org/repo",
+    ServiceName: "metaflow_cicd",
+    RepoURL:     "https://github.com/neunexus/metaflow_cicd",
     Branch:      "main",
+    BuildMode:   "ci",
 }
-we, err := c.ExecuteWorkflow(context.Background(), options, workflow.CIWorkflow, args)
+we, err := c.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflow, args)
 ```
 
 ## 5. 로그 확인
 
 ```bash
 # Worker 로그
-docker logs -f cicd-worker
+docker logs -f metaflow_cicd
 
 # Temporal 서버 로그
 docker logs -f temporal
@@ -205,8 +147,8 @@ Worker 코드 수정 후 이미지만 다시 빌드:
 
 ```bash
 cd /morphogen/neunexus/cicd/temporal
-docker compose build cicd-worker
-docker compose up -d cicd-worker
+docker compose build metaflow_cicd
+docker compose up -d metaflow_cicd
 ```
 
 ## 디렉터리 구조
@@ -214,13 +156,17 @@ docker compose up -d cicd-worker
 ```
 metaflow_cicd/
 ├── cmd/
-│   ├── server/     # POST API (ci_projects, ci_secrets 등록)
-│   ├── worker/     # Temporal Worker (워크플로우/액티비티 실행)
-│   └── starter/    # 워크플로우 트리거 (DB 조회 후 시작)
-├── workflow/       # CIWorkflow, PipelineRequest 등 공용 정의
-├── internal/       # repository, secret store 등
-├── go.mod, go.sum
-└── README.md
+│   ├── server/     # POST API (sources, projects, secrets)
+│   ├── worker/     # Temporal Worker (ManagerWorkflow, RunnerWorkflow)
+│   └── seed/       # metaflow_cicd 프로젝트 시드
+├── workflow/       # ManagerWorkflow, RunnerWorkflow, PipelineRequest
+├── internal/
+│   ├── repository/ # sources, projects, secrets
+│   └── runner/     # PreFlightCheckActivity, RunMetaflowActivity
+├── metaflow_ci.py  # 샘플 CI용 Python 스크립트 (python metaflow_ci.py run)
+├── metaflow-ci.toml # 파이프라인 설정 예시
+├── migrations/     # DDL
+└── scripts/        # test_pipeline.sh
 ```
 
-Worker는 `CIWorkflow`와 `DaggerBuildActivity`를 등록하며, 현재 액티비티는 스텁입니다. 실제 Dagger 파이프라인 연동은 `cmd/worker/activity.go`에서 구현하면 됩니다.
+Worker는 `ManagerWorkflow`(Pre-flight → Runner)와 `RunnerWorkflow`(Metaflow 실행)를 등록합니다.

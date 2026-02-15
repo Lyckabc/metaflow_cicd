@@ -85,8 +85,8 @@ Convoy/GitHub Webhook에서 다음 이벤트 구독:
 
 | 파일 | 내용 |
 |------|------|
-| `internal/handler/webhook.go` | WebhookAdapter - GitHub payload 변환, BuildMode 결정 |
-| `internal/handler/trigger.go` | Trigger - 워크플로우 시작 |
+| `metaflow_manager/internal/handler/webhook.go` | WebhookAdapter - GitHub payload 변환, BuildMode 결정 |
+| `metaflow_manager/internal/handler/trigger.go` | Trigger - 워크플로우 시작 |
 | `internal/runner/github_status.go` | UpdateGitHubStatusActivity - GitHub Status API |
 | `workflow/pipeline.go` | DynamicRunnerWorkflow - CI/CD 분기 및 Status 업데이트 |
 | `cmd/worker/workflow.go` | Workflow/Activity 등록 |
