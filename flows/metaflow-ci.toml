@@ -32,6 +32,7 @@ DB_PASSWORD = "METAFLOW_CICD_DB_PASSWORD"
 GIT_TOKEN = "LYCKABC_GIT_TOKEN"
 REGISTRY_ID = "TOJI_REGISTRY_ID"
 REGISTRY_PASSWORD = "TOJI_REGISTRY_PASSWORD"
+REGISTRY_URL = "TOJI_REGISTRY_URL"
 [artifacts]
 # 빌드 완료 후 보관할 결과물 경로
 # docker repository도 source에서 가져와서 활용 [DB sources 테이블의 name] 을 통해 가져온 데이터 활용 (host, username, password_text 또는 access_token) 
