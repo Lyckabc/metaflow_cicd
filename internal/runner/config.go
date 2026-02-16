@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/neunexus/metaflow_cicd/internal/repository"
 	"github.com/neunexus/metaflow_cicd/workflow"
@@ -45,9 +46,47 @@ func GetConfigActivity(ctx context.Context, req workflow.PipelineRequest) (*work
 		if len(project.TargetBranches) > 0 {
 			branch = project.TargetBranches[0]
 		}
-		runCmd = "python " + project.CIConfigPath + " run"
+		configPath := project.CIConfigPath
 		if req.BuildMode == "cd" {
-			runCmd = "python " + project.CDConfigPath + " run"
+			configPath = project.CDConfigPath
+		}
+		// TOML config: fetch from repo and use [build] command (metaflow-ci.toml)
+		if IsTOMLConfig(configPath) {
+			gitURL := repoURL
+			accessToken := ""
+			sn := project.CISourceName
+			if req.BuildMode == "cd" {
+				sn = project.CDSourceName
+			}
+			if sn != nil && *sn != "" {
+				if src, err := repo.GetSourceByName(ctx, *sn); err == nil {
+					if src.Host != nil && strings.TrimSpace(*src.Host) != "" {
+						gitURL = strings.TrimSpace(*src.Host)
+					}
+					if src.AccessToken != nil {
+						accessToken = strings.TrimSpace(*src.AccessToken)
+					}
+				}
+			}
+			if req.Branch != "" {
+				branch = req.Branch
+			}
+			if cfg, err := FetchAndParseConfig(ctx, gitURL, branch, accessToken, configPath); err == nil && cfg != nil {
+				preBuild := strings.TrimSpace(cfg.Build.PreBuild)
+				cmd := strings.TrimSpace(cfg.Build.Command)
+				if cmd == "" {
+					cmd = "python " + cfg.Build.Entrypoint + " run"
+				}
+				if preBuild != "" {
+					runCmd = preBuild + " && " + cmd
+				} else {
+					runCmd = cmd
+				}
+			} else {
+				runCmd = "python " + configPath + " run" // fallback (legacy)
+			}
+		} else {
+			runCmd = "python " + configPath + " run"
 		}
 		registryID, _ = repo.GetSecretValue(ctx, int(project.ID), "REGISTRY_ID", "prod")
 		registryPassword, _ = repo.GetSecretValue(ctx, int(project.ID), "REGISTRY_PASSWORD", "prod")
