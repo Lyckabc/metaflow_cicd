@@ -1,8 +1,10 @@
 # metaflow-ci.toml - Pipeline configuration for metaflow_cicd project
-# This file describes the CI/CD setup for the metaflow_cicd repository.
-# Use these values when inserting into projects/sources/secrets tables.
-
-# [flows/metaflow-ci.toml]
+#
+# flows/runner/metaflow_ci.go, test_pipeline.sh와 동일한 build test를 Temporal SDK로 실행.
+# 테스트 방법: docs/README_TEST.md 참고.
+#
+# DB projects 테이블: ci_config_path = "flows/metaflow-ci.toml"
+# metaflow_ci.go 기본값: project=metaflow_cicd, repo=https://github.com/Lyckabc/metaflow_cicd, branch=dev
 
 [project]
 name = "metaflow_cicd"
@@ -10,11 +12,11 @@ name = "metaflow_cicd"
 # version = "1.2.0"
 
 [build]
-# 실행할 메인 파일 (사용자님이 말씀하신 Metaflow 파일)
+# 실행할 메인 파일 (Metaflow 스타일 CI flow)
 entrypoint = "flows/runner/metaflow_ci.py"
 # 빌드 전 실행할 셸 명령
 pre_build = "pip install -r requirements.txt"
-# 메인 실행 명령 (Temporal Runner가 호출할 커맨드)
+# 메인 실행 명령 (Temporal Runner가 호출, RunMetaflowActivity)
 command = "python flows/runner/metaflow_ci.py run"
 
 [config]
@@ -34,10 +36,10 @@ REGISTRY_ID = "TOJI_REGISTRY_ID"
 REGISTRY_PASSWORD = "TOJI_REGISTRY_PASSWORD"
 REGISTRY_URL = "TOJI_REGISTRY_URL"
 
-# [registry] CI(metaflow_ci.py run) 완료 후 cicd worker가 수행하는 단계
+# [registry] CI(metaflow_ci.py run) 완료 후 ManagerWorkflow가 수행
 # 1. registry login - secrets_mapping의 REGISTRY_URL, REGISTRY_ID, REGISTRY_PASSWORD 사용
 # 2. docker build - Dockerfile로 이미지 빌드
-# 3. docker push - {registry_url}/{service_name}:{yymmddhhmm} 형식으로 push
+# 3. docker push - {registry_url}/{service_name}:{branch}-{yymmddhhmm} 형식
 [registry]
 enabled = true
 dockerfile = "Dockerfile"
