@@ -8,16 +8,16 @@
 
 [project]
 name = "metaflow_cicd"
-# language = "python" # 또는 "go", "java", "android"
-# version = "1.2.0"
+language = "go"
+version = "1.2.4"
 
 [build]
-# 실행할 메인 파일 (Metaflow 스타일 CI flow)
-entrypoint = "flows/runner/metaflow_ci.py"
-# 빌드 전 실행할 셸 명령
-pre_build = "pip install -r requirements.txt"
+# 실행할 메인 파일 (Go CI flow)
+entrypoint = "flows/runner/metaflow_ci.go"
+# 빌드 전 실행할 셸 명령 (Go 의존성 다운로드)
+pre_build = "go mod download"
 # 메인 실행 명령 (Temporal Runner가 호출, RunMetaflowActivity)
-command = "python flows/runner/metaflow_ci.py run"
+command = "go run ./flows/runner/metaflow_ci.go run"
 
 [config]
 # 일반적인 설정값 (DB에 넣지 않는 비민감 데이터)
@@ -36,7 +36,7 @@ REGISTRY_ID = "TOJI_REGISTRY_ID"
 REGISTRY_PASSWORD = "TOJI_REGISTRY_PASSWORD"
 REGISTRY_URL = "TOJI_REGISTRY_URL"
 
-# [registry] CI(metaflow_ci.py run) 완료 후 ManagerWorkflow가 수행
+# [registry] CI(metaflow_ci.go run) 완료 후 ManagerWorkflow가 수행
 # 1. registry login - secrets_mapping의 REGISTRY_URL, REGISTRY_ID, REGISTRY_PASSWORD 사용
 # 2. docker build - Dockerfile로 이미지 빌드
 # 3. docker push - {registry_url}/{service_name}:{branch}-{yymmddhhmm} 형식

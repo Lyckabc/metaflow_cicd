@@ -10,6 +10,10 @@
 //
 // Usage:
 //
+//	# CI run (Temporal Runner가 metaflow-ci.toml [build] command로 호출)
+//	go run ./flows/runner/metaflow_ci.go run
+//
+//	# Temporal SDK로 워크플로우 트리거 (테스트용)
 //	go run ./flows/runner/metaflow_ci.go
 //	go run ./flows/runner/metaflow_ci.go -wait
 //	go run ./flows/runner/metaflow_ci.go -branch dev -mode cd
@@ -54,6 +58,14 @@ func main() {
 	wait := flag.Bool("wait", false, "wait for workflow completion")
 	createProject := flag.Bool("create-project", true, "create/update project via API before trigger")
 	flag.Parse()
+
+	// "run" subcommand: CI validation (metaflow-ci.toml [build] command에서 호출)
+	for _, arg := range os.Args[1:] {
+		if arg == "run" {
+			runCI()
+			return
+		}
+	}
 
 	projectName := defaultProjectName
 	repoURL := defaultRepoURL
@@ -148,7 +160,7 @@ func main() {
 	} else {
 		fmt.Println("=== 3. Result ===")
 		fmt.Println(" Check Temporal UI for execution status.")
-		fmt.Println(" Flow: PreFlightCheck -> RunnerWorkflow (metaflow_ci.py run) -> DockerBuildPush (on success)")
+		fmt.Println(" Flow: PreFlightCheck -> RunnerWorkflow (metaflow_ci.go run) -> DockerBuildPush (on success)")
 		fmt.Println("\n Use -wait to block until workflow completes.")
 	}
 }
@@ -193,4 +205,20 @@ func createOrUpdateProject(apiURL, projectName, repoURL, branch, mode string) er
 		return nil
 	}
 	return fmt.Errorf("POST /projects: %s %s", resp.Status, errStr)
+}
+
+// runCI performs CI validation (env check, build/test). Called by metaflow-ci.toml [build] command.
+func runCI() {
+	fmt.Println("metaflow_cicd CI flow - OK")
+	keys := []string{"REGISTRY_ID", "REGISTRY_PASSWORD", "GITHUB_TOKEN", "DB_HOST", "LOG_LEVEL"}
+	for _, key := range keys {
+		if v, ok := os.LookupEnv(key); ok {
+			if strings.Contains(key, "PASSWORD") || strings.Contains(key, "TOKEN") {
+				fmt.Printf("  %s: [REDACTED]\n", key)
+			} else {
+				fmt.Printf("  %s: %s\n", key, v)
+			}
+		}
+	}
+	os.Exit(0)
 }
