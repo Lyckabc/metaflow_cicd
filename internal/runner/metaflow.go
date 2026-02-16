@@ -68,33 +68,34 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 		envMap[k] = v
 	}
 
+	// TOML 우선 시도: 파싱 성공 시 사용 (경로/확장자 의존 제거)
 	var preBuild, command string
-	if IsTOMLConfig(configPath) {
-		tomlCfg, err := ParseMetaflowCITOML(configFullPath)
-		if err != nil {
-			return &workflow.RunResult{
-				Stderr:   fmt.Sprintf("parse metaflow-ci.toml: %v", err),
-				ExitCode: 1,
-				Success:  false,
-			}, nil
-		}
+	tomlCfg, parseErr := ParseMetaflowCITOML(configFullPath)
+	if parseErr == nil && tomlCfg != nil && (tomlCfg.Build.Command != "" || tomlCfg.Build.Entrypoint != "") {
+		// TOML 파싱 성공 → [build] command 사용 (Go 실행)
 		preBuild = strings.TrimSpace(tomlCfg.Build.PreBuild)
 		command = strings.TrimSpace(tomlCfg.Build.Command)
 		if command == "" {
 			command = "python " + tomlCfg.Build.Entrypoint + " run"
 		}
-		// Apply secrets_mapping: [env_var] = [DB secret_key] → env[env_var] = secrets[secret_key]
+		// Apply secrets_mapping
 		for envVar, secretKey := range tomlCfg.SecretsMapping {
 			if v, ok := input.Secrets[secretKey]; ok {
 				envMap[envVar] = v
 			}
 		}
-		// Apply [config] section as env (non-sensitive)
 		for k, v := range tomlCfg.Config {
 			envMap[k] = v
 		}
 	} else {
-		// Legacy: config_path is Python file (never use for .toml)
+		// Legacy: Python 파일. .toml은 python 실행 불가.
+		if IsTOMLConfig(configPath) || IsTOMLConfig(configFullPath) || strings.ToLower(filepath.Ext(configFullPath)) == ".toml" {
+			return &workflow.RunResult{
+				Stderr:   fmt.Sprintf("config %s is TOML but parse failed: %v; cannot run as Python", configPath, parseErr),
+				ExitCode: 1,
+				Success:  false,
+			}, nil
+		}
 		command = "python " + configPath + " run"
 	}
 

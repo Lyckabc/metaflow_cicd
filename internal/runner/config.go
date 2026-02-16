@@ -83,7 +83,11 @@ func GetConfigActivity(ctx context.Context, req workflow.PipelineRequest) (*work
 					runCmd = cmd
 				}
 			} else {
-				runCmd = "python " + configPath + " run" // fallback (legacy)
+				// TOML 파일은 python으로 실행 불가 - fallback "python <path> run" 사용 시 NameError 발생
+				if err != nil {
+					return nil, fmt.Errorf("failed to fetch/parse metaflow-ci.toml (config=%s): %w", configPath, err)
+				}
+				return nil, fmt.Errorf("failed to fetch/parse metaflow-ci.toml (config=%s): config is nil", configPath)
 			}
 		} else {
 			runCmd = "python " + configPath + " run"
