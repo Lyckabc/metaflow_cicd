@@ -11,8 +11,8 @@ RUN go mod download
 COPY . .
 RUN go build -o /worker ./cmd/worker
 
-# 2단계: 실행 스테이지
-FROM alpine:3.18
+# 2단계: 실행 스테이지 (Go 필요: metaflow_manager 등 go run 명령 실행)
+FROM golang:1.24-alpine
 
 RUN apk add --no-cache ca-certificates docker-cli openssh-client git
 
