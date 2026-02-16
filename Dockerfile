@@ -14,7 +14,7 @@ RUN go build -o /worker ./cmd/worker
 # 2단계: 실행 스테이지
 FROM alpine:3.18
 
-RUN apk add --no-cache ca-certificates docker-cli openssh-client git python3 py3-pip
+RUN apk add --no-cache ca-certificates docker-cli openssh-client git
 
 WORKDIR /
 COPY --from=builder /worker /worker
