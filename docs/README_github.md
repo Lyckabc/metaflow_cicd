@@ -199,10 +199,18 @@ docker exec metaflow_cicd env | grep GITHUB_TOKEN
 
 ---
 
+## 워크플로우 ID 형식
+
+각 webhook 트리거마다 고유한 워크플로우 ID를 사용합니다: `ci-{owner}-{repo}-{branch}-{sha7}`
+
+예: `ci-Lyckabc-metaflow_cicd-dev-14f9a99`
+
+- 동일 repo에서 여러 PR/브랜치가 동시에 트리거되어도 충돌 없음
+- 이전에는 `ci-{owner}-{repo}`만 사용해 동일 ID 충돌로 잘못된 SHA가 전달되는 문제가 있었음
+
 ## 관련 파일
 
 | 파일 | 역할 |
-|------|------|
 | `metaflow_manager/internal/handler/webhook.go` | GitHub payload 파싱, PipelineRequest 생성 (GitHubOwner, GitHubRepo, GitHubSHA, TemporalUIBaseURL) |
 | `metaflow_cicd/workflow/manager.go` | ManagerWorkflow - updateGitHubStatusIfSet 호출 |
 | `metaflow_cicd/workflow/pipeline.go` | updateGitHubStatusIfSet, DynamicRunnerWorkflow |

@@ -5,6 +5,9 @@ Run: python metaflow_ci.py run
 
 Invoked by Temporal Runner per flows/metaflow-ci.toml [build] command.
 In production, replace with a proper Metaflow flow (from metaflow import FlowSpec, step).
+
+Flow: pre_build (pip install) -> this run -> on success, cicd worker performs:
+  registry login -> docker build -> docker push (per [registry] in metaflow-ci.toml)
 """
 import os
 import sys

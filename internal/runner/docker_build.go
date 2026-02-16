@@ -59,7 +59,7 @@ func DockerBuildPushActivity(ctx context.Context, config *workflow.PipelineConfi
 		}, nil
 	}
 
-	imageRef := fmt.Sprintf("%s/%s:%s", registryHost, config.ServiceName, tag)
+	imageRef := fmt.Sprintf("%s/%s:%s-%s", registryHost, config.ServiceName, config.Branch, tag)
 
 	// Docker login
 	if config.RegistryID != "" && config.RegistryPassword != "" {

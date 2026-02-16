@@ -2,7 +2,7 @@ package runner
 
 import (
 	"os"
-	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -22,7 +22,11 @@ type MetaflowCITOML struct {
 	} `toml:"build"`
 	Config map[string]string `toml:"config"`
 	SecretsMapping map[string]string `toml:"secrets_mapping"`
-	Artifacts      struct {
+	Registry       struct {
+		Enabled    bool   `toml:"enabled"`
+		Dockerfile string `toml:"dockerfile"`
+	} `toml:"registry"`
+	Artifacts struct {
 		RegistryName string `toml:"REGISTRY_NAME"`
 	} `toml:"artifacts"`
 }
@@ -42,5 +46,38 @@ func ParseMetaflowCITOML(path string) (*MetaflowCITOML, error) {
 
 // IsTOMLConfig returns true if configPath has .toml extension.
 func IsTOMLConfig(configPath string) bool {
-	return filepath.Ext(configPath) == ".toml"
+	p := strings.TrimSpace(configPath)
+	return strings.HasSuffix(strings.ToLower(p), ".toml")
+}
+
+// GetSecretValue returns the secret_value from secrets map using the secret_key.
+// secrets_mapping maps [env_var_name] = [DB secrets.secret_key].
+// Given envVarName (e.g. "REGISTRY_URL"), looks up secret_key (e.g. "TOJI_REGISTRY_URL")
+// and returns secrets[secret_key] (the secret_value from DB).
+// Returns empty string if envVarName is not in secrets_mapping or secret_key is not in secrets.
+func (c *MetaflowCITOML) GetSecretValue(secrets map[string]string, envVarName string) string {
+	if c.SecretsMapping == nil {
+		return ""
+	}
+	secretKey, ok := c.SecretsMapping[envVarName]
+	if !ok || secretKey == "" {
+		return ""
+	}
+	return secrets[secretKey]
+}
+
+// RegistryEnvVars are the standard env var names for registry credentials in secrets_mapping.
+const (
+	RegistryURLEnv      = "REGISTRY_URL"
+	RegistryIDEnv       = "REGISTRY_ID"
+	RegistryPasswordEnv = "REGISTRY_PASSWORD"
+)
+
+// GetRegistryFromSecrets returns (url, id, password) using secrets_mapping.
+// Uses REGISTRY_URL, REGISTRY_ID, REGISTRY_PASSWORD keys from secrets_mapping.
+func (c *MetaflowCITOML) GetRegistryFromSecrets(secrets map[string]string) (url, id, password string) {
+	url = strings.TrimSpace(c.GetSecretValue(secrets, RegistryURLEnv))
+	id = strings.TrimSpace(c.GetSecretValue(secrets, RegistryIDEnv))
+	password = c.GetSecretValue(secrets, RegistryPasswordEnv)
+	return url, id, password
 }
