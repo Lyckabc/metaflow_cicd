@@ -3,6 +3,8 @@
 `flows/runner/metaflow_ci.go`는 metaflow_cicd Self CI를 Temporal SDK로 직접 실행하는 테스트입니다.
 `test_pipeline.sh`와 동일한 build test를 Trigger API 없이 Temporal 클라이언트로 트리거합니다.
 
+CI Runner는 `flows/metaflow-ci.toml` [build]에서 `metaflow_ci.go run`을 사용합니다.
+
 ## 사전 요구사항
 
 - metaflow_cicd DB (projects, secrets)
