@@ -33,6 +33,16 @@ GIT_TOKEN = "LYCKABC_GIT_TOKEN"
 REGISTRY_ID = "TOJI_REGISTRY_ID"
 REGISTRY_PASSWORD = "TOJI_REGISTRY_PASSWORD"
 REGISTRY_URL = "TOJI_REGISTRY_URL"
+
+# [registry] CI(metaflow_ci.py run) 완료 후 cicd worker가 수행하는 단계
+# 1. registry login - secrets_mapping의 REGISTRY_URL, REGISTRY_ID, REGISTRY_PASSWORD 사용
+# 2. docker build - Dockerfile로 이미지 빌드
+# 3. docker push - {registry_url}/{service_name}:{yymmddhhmm} 형식으로 push
+[registry]
+enabled = true
+dockerfile = "Dockerfile"
+# image_tag_format = "yymmddhhmm"  # 기본값 (선택)
+
 [artifacts]
 # 빌드 완료 후 보관할 결과물 경로
 # docker repository도 source에서 가져와서 활용 [DB sources 테이블의 name] 을 통해 가져온 데이터 활용 (host, username, password_text 또는 access_token) 
