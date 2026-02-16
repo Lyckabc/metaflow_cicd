@@ -30,7 +30,10 @@ type RunnerInput struct {
 	Branch      string
 	ConfigPath  string // e.g. "metaflow_ci.py" or "flow.py"
 	Secrets     map[string]string
-	BuildMode   string // "ci" or "cd"
+	// SecretsMapping: [env_var_name] = [DB secrets.secret_key]. From metaflow-ci.toml [secrets_mapping].
+	// Used to resolve registry credentials (REGISTRY_URL, REGISTRY_ID, REGISTRY_PASSWORD) from secrets.
+	SecretsMapping map[string]string
+	BuildMode      string // "ci" or "cd"
 
 	// GitHub metadata for commit status updates
 	GitHubOwner       string

@@ -82,6 +82,12 @@ func PreFlightCheckActivity(ctx context.Context, req workflow.PipelineRequest) (
 		secretsMap[s.SecretKey] = s.SecretValue
 	}
 
+	// 6. SecretsMapping: metaflow-ci.toml [secrets_mapping] from cloned repo
+	var secretsMapping map[string]string
+	if cfg, err := FetchAndParseConfig(ctx, gitURL, req.Branch, accessToken, configPath); err == nil && cfg != nil && cfg.SecretsMapping != nil {
+		secretsMapping = cfg.SecretsMapping
+	}
+
 	return &workflow.RunnerInput{
 		ProjectName:       project.ProjectName,
 		GitURL:            gitURL,
@@ -89,6 +95,7 @@ func PreFlightCheckActivity(ctx context.Context, req workflow.PipelineRequest) (
 		Branch:            req.Branch,
 		ConfigPath:        configPath,
 		Secrets:           secretsMap,
+		SecretsMapping:    secretsMapping,
 		BuildMode:         req.BuildMode,
 		GitHubOwner:       req.GitHubOwner,
 		GitHubRepo:        req.GitHubRepo,

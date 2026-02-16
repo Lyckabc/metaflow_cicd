@@ -52,10 +52,11 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 	}
 
 	// 2. Config Load
-	configFullPath := filepath.Join(tmpDir, input.ConfigPath)
+	configPath := strings.TrimSpace(input.ConfigPath)
+	configFullPath := filepath.Join(tmpDir, configPath)
 	if _, err := os.Stat(configFullPath); os.IsNotExist(err) {
 		return &workflow.RunResult{
-			Stderr:   fmt.Sprintf("config file not found: %s", input.ConfigPath),
+			Stderr:   fmt.Sprintf("config file not found: %s", configPath),
 			ExitCode: 1,
 			Success:  false,
 		}, nil
@@ -68,7 +69,7 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 	}
 
 	var preBuild, command string
-	if IsTOMLConfig(input.ConfigPath) {
+	if IsTOMLConfig(configPath) {
 		tomlCfg, err := ParseMetaflowCITOML(configFullPath)
 		if err != nil {
 			return &workflow.RunResult{
@@ -93,8 +94,8 @@ func RunMetaflowActivity(ctx context.Context, input *workflow.RunnerInput) (*wor
 			envMap[k] = v
 		}
 	} else {
-		// Legacy: config_path is Python file
-		command = "python " + input.ConfigPath + " run"
+		// Legacy: config_path is Python file (never use for .toml)
+		command = "python " + configPath + " run"
 	}
 
 	envSlice := envMapToSlice(envMap)
