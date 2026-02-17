@@ -99,10 +99,16 @@ func main() {
 	}
 
 	// 2. Connect Temporal & Trigger workflow
+	// Namespace: metaflow-ci for CI, metaflow-cd for CD
+	namespace := "metaflow-ci"
+	if *mode == "cd" {
+		namespace = "metaflow-cd"
+	}
 	fmt.Println("=== 2. Trigger workflow (Temporal SDK) ===")
+	fmt.Printf(" Namespace: %s\n", namespace)
 	c, err := client.Dial(client.Options{
 		HostPort:  temporalAddr,
-		Namespace: client.DefaultNamespace,
+		Namespace: namespace,
 	})
 	if err != nil {
 		log.Fatalf("Temporal client: %v", err)

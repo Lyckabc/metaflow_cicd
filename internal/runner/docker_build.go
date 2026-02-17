@@ -61,9 +61,17 @@ func DockerBuildPushActivity(ctx context.Context, config *workflow.PipelineConfi
 
 	imageRef := fmt.Sprintf("%s/%s:%s-%s", registryHost, config.ServiceName, config.Branch, tag)
 
+	// Docker env: use DOCKER_API_VERSION to avoid "client version too new" when daemon is older
+	apiVer := "1.43"
+	if v := os.Getenv("DOCKER_API_VERSION"); v != "" {
+		apiVer = v
+	}
+	dockerEnv := append(os.Environ(), "DOCKER_API_VERSION="+apiVer)
+
 	// Docker login
 	if config.RegistryID != "" && config.RegistryPassword != "" {
 		loginCmd := exec.CommandContext(ctx, "docker", "login", "-u", config.RegistryID, "--password-stdin", registryHost)
+		loginCmd.Env = dockerEnv
 		loginCmd.Stdin = strings.NewReader(config.RegistryPassword)
 		var loginOut, loginErr bytes.Buffer
 		loginCmd.Stdout = &loginOut
@@ -80,6 +88,7 @@ func DockerBuildPushActivity(ctx context.Context, config *workflow.PipelineConfi
 
 	// Docker build
 	buildCmd := exec.CommandContext(ctx, "docker", "build", "-t", imageRef, ".")
+	buildCmd.Env = dockerEnv
 	buildCmd.Dir = tmpDir
 	var buildOut, buildErr bytes.Buffer
 	buildCmd.Stdout = &buildOut
@@ -96,6 +105,7 @@ func DockerBuildPushActivity(ctx context.Context, config *workflow.PipelineConfi
 
 	// Docker push
 	pushCmd := exec.CommandContext(ctx, "docker", "push", imageRef)
+	pushCmd.Env = dockerEnv
 	var pushOut, pushErr bytes.Buffer
 	pushCmd.Stdout = &pushOut
 	pushCmd.Stderr = &pushErr
